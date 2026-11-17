@@ -126,7 +126,7 @@ async function openAgent(ctx, itemId, saved, { store, producer }) {
   }
 }
 
-/** 把一轮的新事件折成给面板看的结果。 */
+/** 把一轮的事件折成给面板看的结果（结束时用）。 */
 function readTurn(session) {
   const events = typeof session?.snapshotEvents === 'function' ? session.snapshotEvents() : []
   const list = Array.isArray(events) ? events : []
@@ -144,6 +144,44 @@ function readTurn(session) {
   const reason = end?.data?.reason
   const failed = reason && reason.kind !== 'completed' ? (reason.error?.message ?? '这一轮没跑完') : null
   return { text, toolNames, failed }
+}
+
+/**
+ * 跑着的时候给面板看的实时状态：正在调用的工具行 + 已经产出的文字。
+ * 直接从 session 事件折出来，避免为了流式再开一条通道。
+ * @param {object} session - agent 的 session。
+ * @returns {{tools: object[], text: string}}
+ */
+function readLive(session) {
+  const events = typeof session?.snapshotEvents === 'function' ? session.snapshotEvents() : []
+  const list = Array.isArray(events) ? events : []
+  const tools = []
+  const byCall = new Map()
+  let text = ''
+  for (const event of list) {
+    if (event?.type === 'tool/call') {
+      const row = { id: event.data?.callId ?? '', name: event.data?.name ?? '工具', args: String(event.data?.arguments ?? '').slice(0, 180), status: 'running', result: '' }
+      tools.push(row)
+      if (row.id) byCall.set(row.id, row)
+      continue
+    }
+    if (event?.type === 'tool/result') {
+      const callId = event.data?.toolCallId ?? event.data?.message?.toolCallId
+      const row = callId ? byCall.get(callId) : undefined
+      if (!row) continue
+      const content = event.data?.message?.content
+      row.result = Array.isArray(content) ? content.filter(part => part?.type === 'text').map(part => part.text).join('\n').slice(0, 400) : ''
+      row.status = event.data?.message?.isError ? 'error' : 'done'
+      continue
+    }
+    if (event?.type === 'assistant/message') {
+      const content = event.data?.message?.content
+      if (!Array.isArray(content)) continue
+      const value = content.filter(part => part?.type === 'text').map(part => part.text).join('\n').trim()
+      if (value) text = value
+    }
+  }
+  return { tools: tools.slice(-12), text }
 }
 
 export function agentRecordFor(itemId) {
@@ -168,7 +206,24 @@ export function startTurn({ ctx, store, settings, producer, itemId, message, foc
     const record = await openAgent(ctx, itemId, saved, { store, producer })
     if (record.presetError) run.presetError = record.presetError
     await record.handle.agent.followup({ content: [{ type: 'text', text: message }], source: { kind: 'user' } })
-    await record.handle.agent.whenIdle()
+    // 跑的过程中不断刷新可见状态：工具行 + 已产出的文字
+    const ticker = setInterval(() => {
+      try {
+        run.live = readLive(record.handle.agent.session)
+      } catch {
+        // 读不到就等下一次
+      }
+    }, 700)
+    try {
+      await record.handle.agent.whenIdle()
+    } finally {
+      clearInterval(ticker)
+      try {
+        run.live = readLive(record.handle.agent.session)
+      } catch {
+        // 收尾读失败不影响落盘
+      }
+    }
     const turn = readTurn(record.handle.agent.session)
     run.text = turn.text
     run.tools = turn.toolNames

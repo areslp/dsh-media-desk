@@ -44,6 +44,7 @@ export function ChatPanel({ itemId, head, top = null, suggestions, placeholder, 
   const chat = React.useMemo(() => all.filter(m => (m.itemId ?? null) === (itemId ?? null)), [all, itemId])
   const thinking = useDesk(s => s.thinking)
   const approval = useDesk(s => s.agentApproval)
+  const live = useDesk(s => s.agentLive)
   const quote = useDesk(s => s.chatQuote)
   const [text, setText] = React.useState('')
   const scroller = React.useRef(null)
@@ -82,6 +83,7 @@ export function ChatPanel({ itemId, head, top = null, suggestions, placeholder, 
           </div>
         ) : chat.map(message => <Message key={message.id} message={message} canUndoThis={message === lastBot && message.undoable} />)}
         {thinking ? <div className="md-msg is-bot"><span className="md-shimmer">{t('正在处理……')}</span></div> : null}
+        {thinking && live ? <AgentLive live={live} /> : null}
         {approval ? <ApprovalCard itemId={itemId} approval={approval} /> : null}
       </div>
       {suggestions?.length ? (
@@ -173,6 +175,28 @@ function ApprovalCard({ itemId, approval }) {
         <button type="button" className="md-pill is-primary" disabled={busy} onClick={() => decide(true)}>{t('允许一次')}</button>
         <button type="button" className="md-pill" disabled={busy} onClick={() => decide(false)}>{t('拒绝')}</button>
       </div>
+    </div>
+  )
+}
+
+/** 正在跑的时候把工具调用和已产出的文字摊开，让人看得见它在干什么。 */
+function AgentLive({ live }) {
+  const tools = live?.tools ?? []
+  const text = live?.text ?? ''
+  if (!tools.length && !text) return null
+  return (
+    <div className="md-msg is-bot" style={{ display: 'grid', gap: 6 }}>
+      {text ? <div style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', opacity: 0.85 }}>{text}</div> : null}
+      {tools.map(row => (
+        <div key={row.id || row.name} style={{ display: 'grid', gap: 2, fontSize: 12, lineHeight: 1.5, opacity: row.status === 'running' ? 0.95 : 0.75 }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+            <span aria-hidden="true">{row.status === 'running' ? '◐' : row.status === 'error' ? '✕' : '✓'}</span>
+            <b style={{ fontFamily: 'var(--dsw-font-mono, monospace)' }}>{row.name}</b>
+            {row.args && row.args !== '{}' ? <span style={{ opacity: 0.6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '16em' }}>{row.args}</span> : null}
+          </div>
+          {row.result ? <div style={{ opacity: 0.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{row.result.slice(0, 200)}</div> : null}
+        </div>
+      ))}
     </div>
   )
 }

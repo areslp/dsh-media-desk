@@ -241,7 +241,7 @@ async function waitAgent(itemId) {
         return
       }
       const run = data?.run
-      setDesk({ agentApproval: run?.pending ?? null })
+      setDesk({ agentApproval: run?.pending ?? null, agentLive: run?.live ?? null })
       if (run?.status !== 'running') {
         if (run?.error) report(new Error(run.error))
         return
@@ -252,7 +252,7 @@ async function waitAgent(itemId) {
       }
     }
   } finally {
-    setDesk({ agentApproval: null })
+    setDesk({ agentApproval: null, agentLive: null })
   }
 }
 
