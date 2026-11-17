@@ -45,6 +45,7 @@ export function ChatPanel({ itemId, head, top = null, suggestions, placeholder, 
   const thinking = useDesk(s => s.thinking)
   const approval = useDesk(s => s.agentApproval)
   const live = useDesk(s => s.agentLive)
+  const agentChat = useDesk(s => s.agentChat)
   const quote = useDesk(s => s.chatQuote)
   const [text, setText] = React.useState('')
   const scroller = React.useRef(null)
@@ -89,6 +90,12 @@ export function ChatPanel({ itemId, head, top = null, suggestions, placeholder, 
       {suggestions?.length ? (
         <div className="md-suggest">
           {suggestions.slice(0, chat.length ? 2 : 4).map(row => <button type="button" key={row} onClick={() => send(row)} disabled={thinking || disabled}>{row}</button>)}
+        </div>
+      ) : null}
+      {agentChat ? (
+        <div style={{ padding: '0 20px 4px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, opacity: 0.65 }} title={t('这条对话跑在真正的 agent 上，会调用工具，敏感操作需要你确认')}>
+          <span style={{ width: 6, height: 6, borderRadius: 99, background: 'currentColor' }} />
+          {t('agent 模式 · 会调用工具')}
         </div>
       ) : null}
       <form className="md-composer" onSubmit={(event) => { event.preventDefault(); send() }}>
