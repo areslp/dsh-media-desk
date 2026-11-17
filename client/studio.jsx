@@ -24,6 +24,23 @@ async function imageDataUrl(src) {
   })
 }
 
+/**
+ * 公众号那一侧不认 <figure>/<figcaption>，也常常把 <strong>/<h2> 的默认样式洗掉，
+ * 所以这里统一换成带内联样式的 <p>/<span>，只留编辑器普遍接受的标签。
+ */
+function wechatize(html) {
+  return html
+    .replace(/<h([1-4])>/g, '<p style="margin:26px 0 10px;line-height:1.5;font-size:18px;font-weight:700">')
+    .replace(/<\/h[1-4]>/g, '</p>')
+    .replace(/<strong>/g, '<span style="font-weight:700">')
+    .replace(/<\/strong>/g, '</span>')
+    .replace(/<em>/g, '<span style="font-style:italic">')
+    .replace(/<\/em>/g, '</span>')
+    .replace(/<code>/g, '<span style="font-family:Menlo,Consolas,monospace;background:#f2f3f5;padding:0 4px;border-radius:3px">')
+    .replace(/<\/code>/g, '</span>')
+    .replace(/<p>/g, '<p style="margin:0 0 16px;line-height:1.75">')
+}
+
 /** 成稿脚本 → 带内嵌图片的 HTML：配图按 anchor 落在对应小节后面，没有 anchor 的放最后。 */
 async function richScriptHtml(production) {
   const sections = String(production.article ?? '').split(/\n(?=##\s)/).map(text => ({
@@ -39,13 +56,14 @@ async function richScriptHtml(production) {
       continue
     }
     const caption = escapeHtml(image.caption ?? '')
-    const html = `<figure style="margin:18px 0;text-align:center"><img src="${data}" alt="${caption}" style="max-width:100%;height:auto"/><figcaption style="margin-top:6px;font-size:13px;color:#888">${caption}</figcaption></figure>`
+    // 图放在 <p> 里、图注也是 <p>：公众号的一键排版只保留这类结构
+    const html = `<p style="margin:18px 0 4px;text-align:center"><img src="${data}" alt="${caption}" style="max-width:100%;height:auto"/></p>${caption ? `<p style="margin:0 0 18px;text-align:center;font-size:13px;line-height:1.6;color:#888">${caption}</p>` : ''}`
     const at = sections.findIndex(section => image.anchor && section.heading === image.anchor)
     const target = at >= 0 ? at : Math.max(0, sections.length - 1)
     figureHtml.set(target, [...(figureHtml.get(target) ?? []), html])
   }
-  const body = sections.map((section, index) => `${renderMarkdown(section.text)}${(figureHtml.get(index) ?? []).join('')}`).join('')
-  return `<div style="font-size:16px;line-height:1.8">${body}</div>`
+  const body = sections.map((section, index) => `${wechatize(renderMarkdown(section.text))}${(figureHtml.get(index) ?? []).join('')}`).join('')
+  return `<div style="font-size:16px;line-height:1.75;color:#333">${body}</div>`
 }
 
 /** 复制脚本：优先 HTML（图片内嵌），浏览器不支持或失败时退回纯文本。 */
