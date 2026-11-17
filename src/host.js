@@ -5,6 +5,7 @@ import { stat, writeFile } from 'node:fs/promises'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assistantModelOverride, callModel, chatPrompts, defaultSelection, extractJson, modelInfo, modelStatus, setAssistantModel } from './ai.js'
+import { agentChatAvailable, chatState, startTurn } from './agent-chat.js'
 import { defaultExportDir, resolveExportDir, saveProduction } from './export.js'
 import { harvest, harvestText } from './harvest.js'
 import { generateImage } from './images.js'
@@ -302,7 +303,11 @@ async function route(ctx, store, desk, req, res) {
       let state = await store.read()
       // 示例数据跟着界面语言走；用户自己的内容不动
       if (samplesNeedLocale(state, currentLang())) state = await store.mutate('', draft => (localizeSamples(draft, currentLang()), draft), { undoable: false })
-      return json(res, 200, { state, model: engineLabel(ctx), modelOk: modelStatus.ok, modelError: modelStatus.error, canUndo: store.undo.length > 0 })
+      return json(res, 200, { state, model: engineLabel(ctx), modelOk: modelStatus.ok, modelError: modelStatus.error, canUndo: store.undo.length > 0, agentChat: agentChatAvailable(ctx) })
+    }
+    if (path === 'agent/state') {
+      const id = url.searchParams.get('itemId') ?? ''
+      return json(res, 200, { available: agentChatAvailable(ctx), run: chatState(id) })
     }
     if (path === 'production') {
       const id = url.searchParams.get('id') ?? ''
@@ -353,6 +358,13 @@ async function route(ctx, store, desk, req, res) {
       return json(res, 200, { label, state: await store.read(), canUndo: store.undo.length > 0 })
     }
     case 'chat': return json(res, 200, await chatTurn(ctx, store, desk, body))
+    case 'agent/turn': {
+      const itemId = String(body.itemId ?? body.focusId ?? 'wall')
+      const message = String(body.message ?? '').trim()
+      if (!message) return json(res, 400, { error: tr('消息为空') })
+      startTurn({ ctx, store, settings: desk.settings, itemId, message, focusId: body.focusId })
+      return json(res, 200, { started: true, available: true })
+    }
     case 'chat/clear': {
       const state = await store.mutate('清空对话', (draft) => { draft.chat = []; return draft }, { undoable: false })
       return json(res, 200, { state })

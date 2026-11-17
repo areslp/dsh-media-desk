@@ -56,7 +56,7 @@ export async function loadDesk() {
     const settings = await request('settings')
     setLanguagePreference(settings.language)
     const data = await request('state')
-    setDesk({ settings, state: data.state, model: data.model, modelOk: data.modelOk, modelError: data.modelError, canUndo: data.canUndo, error: null })
+    setDesk({ settings, state: data.state, model: data.model, modelOk: data.modelOk, modelError: data.modelError, canUndo: data.canUndo, agentChat: Boolean(data.agentChat), error: null })
   } catch (err) {
     setDesk({ error: err.message })
   }
@@ -208,6 +208,15 @@ export async function sendChat(text) {
     state: { ...s.state, chat: [...s.state.chat, { id: `tmp_${Date.now()}`, role: 'user', text: message, itemId: focusId ?? undefined }] },
   }))
   try {
+    if (snapshot.agentChat) {
+      // 面板对话接的是真正的 DSH agent：这里只负责发出去和等它跑完
+      const scope = focusId ?? 'wall'
+      await request('agent/turn', { itemId: scope, message, focusId: focusId ?? undefined })
+      await waitAgent(scope)
+      await loadDesk()
+      runActions([])
+      return
+    }
     const data = await request('chat', { message, focusId: focusId ?? undefined })
     setDesk({ state: data.state, canUndo: true, modelOk: data.modelOk, modelError: data.modelError })
     runActions(data.actions || [])
@@ -216,6 +225,29 @@ export async function sendChat(text) {
     await loadDesk()
   } finally {
     setDesk({ thinking: false })
+  }
+}
+
+/** 轮询 agent 这一轮有没有跑完。 */
+async function waitAgent(itemId) {
+  const deadline = Date.now() + 20 * 60 * 1000
+  for (;;) {
+    await new Promise(resolve => setTimeout(resolve, 1200))
+    let data = null
+    try {
+      data = await request(`agent/state?itemId=${encodeURIComponent(itemId)}`)
+    } catch {
+      return
+    }
+    const run = data?.run
+    if (run?.status !== 'running') {
+      if (run?.error) report(new Error(run.error))
+      return
+    }
+    if (Date.now() > deadline) {
+      report(new Error(t('这一轮跑得太久了，先不等了')))
+      return
+    }
   }
 }
 
