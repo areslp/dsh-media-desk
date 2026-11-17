@@ -79,6 +79,27 @@ function routeFor(ctx, saved) {
 
 const sessionIdFor = itemId => `session-media-desk-${String(itemId).replace(/[^\w-]/g, '').slice(0, 48)}`
 
+/** 这次插件加载里的 session 后缀：同一个进程内复用，重启后重新开一条，避免 resume 到不在 store 里的旧 session。 */
+const LOAD_ID = Date.now().toString(36)
+let loadSeq = 0
+
+/** 扔掉一条 agent：dispose 掉，之后重新开。 */
+async function dropAgent(itemId) {
+  const record = agents.get(itemId)
+  if (!record) return
+  agents.delete(itemId)
+  try {
+    await record.handle.dispose()
+  } catch {
+    // 已经没了就算了
+  }
+}
+
+/** 插件卸载时把开过的 agent 都收掉。 */
+export async function disposeAgents() {
+  for (const itemId of [...agents.keys()]) await dropAgent(itemId)
+}
+
 async function openAgent(ctx, itemId, saved, { store, producer }) {
   const existing = agents.get(itemId)
   if (existing) return existing
@@ -86,23 +107,20 @@ async function openAgent(ctx, itemId, saved, { store, producer }) {
   const service = ctx.get('agents')
   if (!service || !registry) throw new Error('Harness 里没有 agent 服务')
 
-  const sessionId = sessionIdFor(itemId)
   const route = routeFor(ctx, saved)
+  // 每次创建都用没被占用的 id：不再 resume 旧 session，那个 session 可能不在当前 SessionStore 里
   let handle = null
-  try {
-    handle = await service.resume(sessionId)
-  } catch {
-    handle = null
-  }
-  if (!handle) {
+  let forId = null
+  for (let attempt = 0; attempt < 3 && !handle; attempt += 1) {
+    loadSeq += 1
+    forId = `${sessionIdFor(itemId)}-${LOAD_ID}${loadSeq === 1 ? '' : `-${loadSeq}`}`
     try {
-      handle = await service.create({ sessionId, meta: { cwd: process.cwd() }, ...(route ? { agentOptions: route } : {}) })
-    } catch (err) {
-      // 同 id 的 session 已存在但恢复失败时，换一个新 id，别把用户卡死
-      const fallback = `${sessionId}-${Date.now().toString(36)}`
-      handle = await service.create({ sessionId: fallback, meta: { cwd: process.cwd() }, ...(route ? { agentOptions: route } : {}) })
+      handle = await service.create({ sessionId: forId, meta: { cwd: process.cwd() }, ...(route ? { agentOptions: route } : {}) })
+    } catch {
+      handle = null
     }
   }
+  if (!handle) throw new Error('开不了 agent session')
   // 第一轮之前才能选 preset；standard = pwsh/文件/web/skill/子 agent 全套
   try {
     const preset = await registry.select(handle.agent, 'standard')
@@ -203,27 +221,44 @@ export function startTurn({ ctx, store, settings, producer, itemId, message, foc
 
   const task = (async () => {
     const saved = await settings.read().catch(() => null)
-    const record = await openAgent(ctx, itemId, saved, { store, producer })
+    let record = await openAgent(ctx, itemId, saved, { store, producer })
     if (record.presetError) run.presetError = record.presetError
-    await record.handle.agent.followup({ content: [{ type: 'text', text: message }], source: { kind: 'user' } })
-    // 跑的过程中不断刷新可见状态：工具行 + 已产出的文字
-    const ticker = setInterval(() => {
+
+    // 跑一轮；如果撞上「session 不在 SessionStore 里」这类残留状态，扔掉重开一次
+    const runOnce = async () => {
+      await record.handle.agent.followup({ content: [{ type: 'text', text: message }], source: { kind: 'user' } })
+      // 跑的过程中不断刷新可见状态：工具行 + 已产出的文字
+      const ticker = setInterval(() => {
+        try {
+          run.live = readLive(record.handle.agent.session)
+        } catch {
+          // 读不到就等下一次
+        }
+      }, 700)
       try {
-        run.live = readLive(record.handle.agent.session)
-      } catch {
-        // 读不到就等下一次
-      }
-    }, 700)
-    try {
-      await record.handle.agent.whenIdle()
-    } finally {
-      clearInterval(ticker)
-      try {
-        run.live = readLive(record.handle.agent.session)
-      } catch {
-        // 收尾读失败不影响落盘
+        await record.handle.agent.whenIdle()
+      } finally {
+        clearInterval(ticker)
+        try {
+          run.live = readLive(record.handle.agent.session)
+        } catch {
+          // 收尾读失败不影响落盘
+        }
       }
     }
+
+    try {
+      await runOnce()
+    } catch (err) {
+      const message = String(err?.message ?? err)
+      if (!/SessionStore|outside a Session/i.test(message)) throw err
+      // 旧的 session 已经不在 store 里：收掉它，换一条新的再试一次
+      await dropAgent(itemId)
+      record = await openAgent(ctx, itemId, saved, { store, producer })
+      if (record.presetError) run.presetError = record.presetError
+      await runOnce()
+    }
+
     const turn = readTurn(record.handle.agent.session)
     run.text = turn.text
     run.tools = turn.toolNames

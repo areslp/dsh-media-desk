@@ -5,7 +5,7 @@ import { stat, writeFile } from 'node:fs/promises'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assistantModelOverride, callModel, chatPrompts, defaultSelection, extractJson, modelInfo, modelStatus, setAssistantModel } from './ai.js'
-import { agentChatAvailable, chatState, decideApproval, startTurn } from './agent-chat.js'
+import { agentChatAvailable, chatState, decideApproval, disposeAgents, startTurn } from './agent-chat.js'
 import { defaultExportDir, resolveExportDir, saveProduction } from './export.js'
 import { harvest, harvestText } from './harvest.js'
 import { generateImage } from './images.js'
@@ -491,6 +491,10 @@ export default {
     const desk = { settings, producer, monid, versionCheck: createVersionCheck() }
     // 启动时恢复用户在工作台里选过的助手模型
     settings.read().then(saved => setAssistantModel(saved.assistant)).catch(() => {})
+    // 插件卸载时把开过的 agent session 收掉，避免残留
+    ctx.effect(() => () => {
+      disposeAgents().catch(() => {})
+    })
     ctx.effect(() => ctx.webServer.register({
       kind: 'prefix',
       path: '/media-desk',
