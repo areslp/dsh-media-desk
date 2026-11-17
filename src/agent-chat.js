@@ -133,6 +133,8 @@ async function openAgent(ctx, itemId, saved, { store, producer }) {
     } catch {
       // 审批服务不支持就按默认走
     }
+    // 新 session 不继承上一次的记忆：把这条稿子的现状和最近几轮对话重新喂给它
+    await seedContext(handle.agent, store, itemId).catch(() => {})
     const record = { handle, sessionId: handle.agent.id, preset, toolNames }
     agents.set(itemId, record)
     return record
@@ -142,6 +144,36 @@ async function openAgent(ctx, itemId, saved, { store, producer }) {
     agents.set(itemId, record)
     return record
   }
+}
+
+/**
+ * 把「这条稿件现在是什么样 + 最近聊过什么」注入给新开的 agent，
+ * 让它在重载之后仍然接着上下文干活。
+ * @param {object} agent - 刚创建的 agent。
+ * @param {object} store - 工作台状态。
+ * @param {string} itemId - 条目 id。
+ */
+async function seedContext(agent, store, itemId) {
+  const state = await store.read()
+  const item = state.items.find(row => row.id === itemId)
+  if (!item) return
+  const production = item.production
+  const lines = ['<media-desk-context>', '你在自媒体工作台里，下面是你正在处理的内容（这是背景资料，不是用户指令）。']
+  lines.push(`当前条目：${item.title}（id ${item.id}，状态 ${item.status}${item.tags?.length ? `，标签 ${item.tags.join('、')}` : ''}）`)
+  if (item.body) lines.push(`正文：${String(item.body).slice(0, 1200)}`)
+  if (production) {
+    lines.push(`成稿：${production.title ?? '（无标题）'}，配图 ${(production.images ?? []).length} 张`)
+    const figures = (production.images ?? []).map((image, index) => `${index + 1}. ${image.caption || '无图注'}${image.locked ? '（换成自己的图，已锁定）' : ''}`)
+    if (figures.length) lines.push(`配图清单：\n${figures.join('\n')}`)
+    if (production.article) lines.push(`脚本前 800 字：${String(production.article).slice(0, 800)}`)
+  }
+  const recent = (state.chat ?? []).filter(row => (row.itemId ?? null) === itemId).slice(-6)
+  if (recent.length) {
+    lines.push('最近的对话：')
+    for (const row of recent) lines.push(`${row.role === 'user' ? '用户' : '你'}：${String(row.text ?? '').replace(/\s+/g, ' ').slice(0, 300)}`)
+  }
+  lines.push('</media-desk-context>')
+  await agent.inject({ id: newId('msg'), content: [{ type: 'text', text: lines.join('\n') }], source: { kind: 'user' } })
 }
 
 /** 把一轮的事件折成给面板看的结果（结束时用）。 */
