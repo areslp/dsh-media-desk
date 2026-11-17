@@ -362,7 +362,7 @@ async function route(ctx, store, desk, req, res) {
       const itemId = String(body.itemId ?? body.focusId ?? 'wall')
       const message = String(body.message ?? '').trim()
       if (!message) return json(res, 400, { error: tr('消息为空') })
-      startTurn({ ctx, store, settings: desk.settings, itemId, message, focusId: body.focusId })
+      startTurn({ ctx, store, settings: desk.settings, producer: desk.producer, itemId, message, focusId: body.focusId })
       return json(res, 200, { started: true, available: true })
     }
     case 'chat/clear': {

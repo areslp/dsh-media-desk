@@ -1,6 +1,7 @@
 // 工作台对话的 agent 版：每条灵感挂一个真实的 DSH agent session，借用 Harness 的工具和 skill。
 // 面板只管发消息和轮询状态，模型调用、工具、审批、session 日志都由 Harness 负责。
 import { defaultSelection } from './ai.js'
+import { registerAgentTools } from './agent-tools.js'
 import { newId } from './ops.js'
 
 /** 每条灵感一个 agent：itemId -> { handle, sessionId, preset } */
@@ -27,7 +28,7 @@ function routeFor(ctx, saved) {
 
 const sessionIdFor = itemId => `session-media-desk-${String(itemId).replace(/[^\w-]/g, '').slice(0, 48)}`
 
-async function openAgent(ctx, itemId, saved) {
+async function openAgent(ctx, itemId, saved, { store, producer }) {
   const existing = agents.get(itemId)
   if (existing) return existing
   const registry = ctx.get('agentPresets')
@@ -54,7 +55,15 @@ async function openAgent(ctx, itemId, saved) {
   // 第一轮之前才能选 preset；standard = pwsh/文件/web/skill/子 agent 全套
   try {
     const preset = await registry.select(handle.agent, 'standard')
-    const record = { handle, sessionId: handle.agent.id, preset }
+    // 工作台自己的工具挂在 agent 作用域上，只有这个会话看得到
+    const toolNames = registerAgentTools({ agentCtx: handle.agent.ctx, store, producer, itemId })
+    // 面板里没有审批 UI，ask 会 fail-closed；这些会话统一 never，沙箱仍是 workspace-write
+    try {
+      ctx.get('approval')?.setPolicy(handle.agent, 'never')
+    } catch {
+      // 审批服务不支持就按默认走
+    }
+    const record = { handle, sessionId: handle.agent.id, preset, toolNames }
     agents.set(itemId, record)
     return record
   } catch (err) {
@@ -73,8 +82,8 @@ function readTurn(session) {
   const end = [...list].reverse().find(event => event?.type === 'turn/end')
   const toolNames = []
   for (const event of list) {
-    if (event?.type !== 'tool/result') continue
-    const name = event?.data?.call?.name ?? event?.data?.name
+    if (event?.type !== 'tool/call') continue
+    const name = event?.data?.name
     if (name && !toolNames.includes(name)) toolNames.push(name)
   }
   let text = ''
@@ -93,14 +102,14 @@ export function chatState(itemId) {
  * 跑一轮对话：先落用户消息，等 agent 结束，再落助手消息。
  * 立即返回，面板靠 chatState() 轮询。
  */
-export function startTurn({ ctx, store, settings, itemId, message, focusId }) {
+export function startTurn({ ctx, store, settings, producer, itemId, message, focusId }) {
   if (runs.get(itemId)?.status === 'running') throw Object.assign(new Error('这条还在跑，等它说完'), { status: 429 })
   const run = { status: 'running', startedAt: new Date().toISOString(), error: null, text: '', tools: [] }
   runs.set(itemId, run)
 
   const task = (async () => {
     const saved = await settings.read().catch(() => null)
-    const record = await openAgent(ctx, itemId, saved)
+    const record = await openAgent(ctx, itemId, saved, { store, producer })
     if (record.presetError) run.presetError = record.presetError
     await record.handle.agent.followup({ content: [{ type: 'text', text: message }], source: { kind: 'user' } })
     await record.handle.agent.whenIdle()
