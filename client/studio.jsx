@@ -9,6 +9,60 @@ import { SPRING_SNAP, SPRING_SOFT, STYLE_CATEGORIES, fmtDate, fmtWhen, reducedMo
 
 const isBusy = asset => ['pending', 'running'].includes(asset?.status)
 
+const escapeHtml = text => String(text ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]))
+
+/** 把工作台里的图片读成 data URL，粘贴到公众号之类的地方时图才跟着走。 */
+async function imageDataUrl(src) {
+  const res = await fetch(src)
+  if (!res.ok) throw new Error(`图片读取失败（${res.status}）`)
+  const blob = await res.blob()
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
+}
+
+/** 成稿脚本 → 带内嵌图片的 HTML：配图按 anchor 落在对应小节后面，没有 anchor 的放最后。 */
+async function richScriptHtml(production) {
+  const sections = String(production.article ?? '').split(/\n(?=##\s)/).map(text => ({
+    text,
+    heading: /^##\s+(.+)/.exec(text)?.[1]?.trim() ?? '',
+  }))
+  const figureHtml = new Map()
+  for (const image of (production.images ?? []).filter(row => row?.src)) {
+    let data
+    try {
+      data = await imageDataUrl(image.src)
+    } catch {
+      continue
+    }
+    const caption = escapeHtml(image.caption ?? '')
+    const html = `<figure style="margin:18px 0;text-align:center"><img src="${data}" alt="${caption}" style="max-width:100%;height:auto"/><figcaption style="margin-top:6px;font-size:13px;color:#888">${caption}</figcaption></figure>`
+    const at = sections.findIndex(section => image.anchor && section.heading === image.anchor)
+    const target = at >= 0 ? at : Math.max(0, sections.length - 1)
+    figureHtml.set(target, [...(figureHtml.get(target) ?? []), html])
+  }
+  const body = sections.map((section, index) => `${renderMarkdown(section.text)}${(figureHtml.get(index) ?? []).join('')}`).join('')
+  return `<div style="font-size:16px;line-height:1.8">${body}</div>`
+}
+
+/** 复制脚本：优先 HTML（图片内嵌），浏览器不支持或失败时退回纯文本。 */
+async function copyScript(production) {
+  const plain = `# ${production.title}\n\n${production.article}`
+  try {
+    const html = await richScriptHtml(production)
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/html': new Blob([html], { type: 'text/html' }),
+      'text/plain': new Blob([plain], { type: 'text/plain' }),
+    })])
+  } catch {
+    await navigator.clipboard.writeText(plain)
+    toast(t('只复制到了文字，图片没能带上'))
+  }
+}
+
 function unescapeJson(text) {
   try {
     return JSON.parse(`"${text}"`)
@@ -194,8 +248,8 @@ function HeroTile({ item, live, onView }) {
   const showFigures = (settings?.imageReady && production?.withImages !== false) || images.some(a => a?.src)
   const [saving, setSaving] = React.useState(false)
   const copy = async () => {
-    await navigator.clipboard.writeText(`# ${production.title}\n\n${production.article}`)
-    toast(production.format === 'article' ? t('文章已复制') : t('脚本已复制'))
+    await copyScript(production)
+    toast(production.format === 'article' ? t('文章已复制（含图）') : t('脚本已复制（含图）'))
   }
   const save = async () => {
     setSaving(true)
@@ -313,8 +367,8 @@ function ArticleTile({ item, live, open, onToggle, onView, tileRef }) {
     setEditing(false)
   }
   const copy = async () => {
-    await navigator.clipboard.writeText(`# ${production?.title || item.title}\n\n${article}`)
-    toast(production?.format === 'article' ? t('文章已复制') : t('脚本已复制'))
+    await copyScript({ ...(production ?? {}), title: production?.title || item.title, article })
+    toast(production?.format === 'article' ? t('文章已复制（含图）') : t('脚本已复制（含图）'))
   }
   // 选中一段，交给助手改
   const onMouseUp = () => {
