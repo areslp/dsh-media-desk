@@ -37,6 +37,54 @@ const brief = item => ({
 })
 
 /**
+ * 改成稿内容：标题、封面大字、整篇脚本、精确替换、配图图注。
+ * 只碰文本，不触发生图。
+ * @param {object} store - 工作台 state store。
+ * @param {string} target - 条目 id。
+ * @param {object} patch - 要改的字段。
+ * @returns {Promise<string[]>} 实际改动的说明。
+ */
+export async function editProduction(store, target, patch) {
+  const applied = []
+  const before = await store.read()
+  if (!before.items.find(row => row.id === target)?.production) throw new Error('这条还没有成稿')
+  await store.mutate('agent：改成稿', (draft) => {
+    const production = draft.items.find(row => row.id === target)?.production
+    if (!production) return draft
+    if (typeof patch.title === 'string' && patch.title.trim()) {
+      production.title = patch.title.trim().slice(0, 200)
+      applied.push('标题')
+    }
+    if (typeof patch.coverText === 'string' && patch.coverText.trim()) {
+      production.coverText = patch.coverText.trim().slice(0, 40)
+      applied.push('封面大字')
+    }
+    if (typeof patch.article === 'string' && patch.article.trim()) {
+      production.article = patch.article.slice(0, 200000)
+      applied.push('整篇脚本')
+    }
+    if (Array.isArray(patch.edits)) {
+      for (const edit of patch.edits.slice(0, 20)) {
+        if (typeof edit?.find !== 'string' || !edit.find || typeof edit?.replace !== 'string') continue
+        if (!String(production.article ?? '').includes(edit.find)) continue
+        production.article = production.article.replace(edit.find, () => edit.replace)
+        applied.push(`替换「${edit.find.slice(0, 12)}」`)
+      }
+    }
+    if (Array.isArray(patch.figures)) {
+      for (const row of patch.figures.slice(0, 8)) {
+        const figure = production.images?.[Number(row?.index)]
+        if (!figure || typeof row?.caption !== 'string') continue
+        figure.caption = row.caption.slice(0, 60)
+        applied.push(`配图 ${Number(row.index) + 1} 图注`)
+      }
+    }
+    return draft
+  })
+  return applied
+}
+
+/**
  * 把工作台工具挂到一个 agent 上。
  * @param {object} options
  * @param {object} options.agentCtx - agent.ctx，工具只对这个 agent 可见。
@@ -135,6 +183,39 @@ export function registerAgentTools({ agentCtx, store, producer, itemId }) {
       const result = await store.mutate('agent：改条目', draft => ({ ...applyOps(draft, [{ op: 'update_item', id: target, ...patch }]), state: draft }))
       if (result.errors.length) return `失败：${result.errors.join('；')}`
       return `已更新 ${target}：${Object.keys(patch).join('、')}`
+    },
+  ))
+
+  add(tool(
+    'media_desk_edit_production',
+    '改成稿内容：标题、封面大字、整篇脚本，或者用 find/replace 精确改几处，也可以改配图图注。默认改当前这条。改完不会重画配图。',
+    schema({
+      itemId: { type: 'string', description: '条目 id，省略则改当前这条' },
+      title: { type: 'string', description: '成稿标题' },
+      coverText: { type: 'string', description: '封面大字（最多 24 字）' },
+      article: { type: 'string', description: '整篇脚本（Markdown，不含一级标题）。只改局部请用 edits' },
+      edits: {
+        type: 'array',
+        description: '精确替换，最多 20 条；find 必须与脚本原文一字不差且足够长',
+        items: {
+          type: 'object',
+          properties: { find: { type: 'string' }, replace: { type: 'string' } },
+          required: ['find', 'replace'],
+        },
+      },
+      figures: {
+        type: 'array',
+        description: '改配图图注，index 从 0 开始',
+        items: {
+          type: 'object',
+          properties: { index: { type: 'number' }, caption: { type: 'string' } },
+          required: ['index', 'caption'],
+        },
+      },
+    }),
+    async ({ itemId: id, ...patch }) => {
+      const applied = await editProduction(store, current(id), patch)
+      return applied.length ? `已更新：${applied.join('、')}` : '失败：没有可用的改动（检查 article/edits 是否与原文一致）'
     },
   ))
 
