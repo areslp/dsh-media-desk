@@ -53,6 +53,33 @@ function assetAt(production, target) {
   return (parsed.kind === 'image' ? production.images : production.shots)?.[parsed.index] ?? null
 }
 
+/** 用户自己放进来的图（上传的原图）带 locked：成稿流水线不重画、不覆盖。 */
+function lockedSlots(production) {
+  const slots = new Map()
+  ;(production?.images ?? []).forEach((asset, index) => {
+    if (asset?.locked && asset.src) slots.set(index, structuredClone(asset))
+  })
+  return slots
+}
+
+/**
+ * 把锁定图按原位置放回计划里：计划该位置有图就用锁定图顶掉，计划比锁定位置短就补到末尾。
+ * @param {object[]} planned - 策划案给出的配图。
+ * @param {Map<number, object>} locked - 位置 -> 锁定图。
+ * @param {string} status - 新画的图初始状态。
+ * @returns {object[]} 合并后的配图列表。
+ */
+export function mergeLockedImages(planned, locked, status) {
+  const total = Math.max(planned.length, ...[...locked.keys()].map(index => index + 1), 0)
+  const images = []
+  for (let index = 0; index < total; index += 1) {
+    const hit = locked.get(index)
+    if (hit) images.push({ ...hit, status: 'done' })
+    else if (index < planned.length) images.push({ ...planned[index], status })
+  }
+  return images
+}
+
 function fullPrompt(production, target, asset) {
   const { kind } = parseTarget(target)
   if (kind === 'cover') return coverPrompt(asset.prompt)
@@ -183,13 +210,15 @@ export class Producer {
     // 单次选择优先；没传就按设置里的默认值
     const settings = await this.settings.read()
     const draw = typeof withImages === 'boolean' ? withImages : settings.generateImages !== false
-    const job = { stage: 'brief', text: '', planText: '', controller: new AbortController(), withImages: draw }
+    // 用户自己换过的配图在重新成稿时必须留住
+    const locked = lockedSlots(item.production)
+    const job = { stage: 'brief', text: '', planText: '', controller: new AbortController(), withImages: draw, locked }
     this.jobs.set(id, job)
     await this.store.mutate('开始成稿', (draft) => {
       const target = draft.items.find(row => row.id === id)
       // 重新成稿后还存回原来的文件夹，不会每做一次多出一个
       const { savedPath, savedHashes } = target.production ?? {}
-      target.production = { status: 'running', stage: 'brief', withImages: draw, startedAt: new Date().toISOString(), format: draftFormat(draft.draftFormat), title: target.title, article: '', cover: null, images: [], shots: [], ...(savedPath ? { savedPath, savedHashes } : {}) }
+      target.production = { status: 'running', stage: 'brief', withImages: draw, startedAt: new Date().toISOString(), format: draftFormat(draft.draftFormat), title: target.title, article: '', cover: null, images: [...locked.values()], shots: [], ...(savedPath ? { savedPath, savedHashes } : {}) }
       return draft
     }, { undoable: false })
     // 不等待：浏览器靠轮询拿进度
@@ -229,6 +258,8 @@ export class Producer {
       const draw = job.withImages !== false
       const ready = configured && draw
       const initial = ready ? 'pending' : 'skipped'
+      // 锁定的图占住原来的位置，策划案只能填剩下的位置
+      const images = mergeLockedImages(plan.images, job.locked ?? new Map(), initial)
       job.stage = 'making'
       await this.patch(id, (production) => {
         production.stage = 'making'
@@ -239,7 +270,7 @@ export class Producer {
         production.outline = plan.outline
         production.characters = plan.characters
         production.cover = { prompt: plan.cover, status: initial }
-        production.images = plan.images.map(row => ({ ...row, status: initial }))
+        production.images = images
         production.shots = plan.shots.map(row => ({ ...row, status: initial }))
         if (!configured && draw) production.needsProvider = true
       })
@@ -272,7 +303,9 @@ export class Producer {
 
       const tasks = [writeArticle()]
       if (ready) {
-        const targets = ['cover', ...plan.images.map((_, i) => `image:${i}`), ...plan.shots.map((_, i) => `shot:${i}`)]
+        const lockedIndexes = job.locked ?? new Map()
+        const imageTargets = images.map((_, index) => index).filter(index => !lockedIndexes.has(index)).map(index => `image:${index}`)
+        const targets = ['cover', ...imageTargets, ...plan.shots.map((_, i) => `shot:${i}`)]
         let next = 0
         const worker = async () => {
           while (next < targets.length && !signal.aborted) {
@@ -326,14 +359,22 @@ export class Producer {
 
   async renderAsset(id, target, settings, signal) {
     let prompt = null
+    let locked = false
     await this.patch(id, (production) => {
       const asset = assetAt(production, target)
       if (!asset) return
+      // 锁定图已经画好了，重画请求一律忽略，避免覆盖用户自己换上的图
+      if (asset.locked && asset.src) {
+        asset.status = 'done'
+        asset.error = null
+        locked = true
+        return
+      }
       asset.status = 'running'
       asset.error = null
       prompt = fullPrompt(production, target, asset)
     })
-    if (!prompt) return
+    if (locked || !prompt) return
     try {
       const { buffer, ext } = await this.generateWithRetry(settings.image, prompt, signal)
       const name = `${newId('g')}${ext}`
@@ -365,6 +406,7 @@ export class Producer {
     const state = await this.store.read()
     const production = state.items.find(row => row.id === id)?.production
     if (!production || !assetAt(production, target)) throw Object.assign(new Error(tr('找不到这张图')), { status: 404 })
+    if (assetAt(production, target).locked) throw Object.assign(new Error(tr('这张图是你自己的，先解锁再重画')), { status: 400 })
     this.assets.add(key)
     await this.patch(id, (next) => { assetAt(next, target).status = 'running' })
     this.renderAsset(id, target, settings).catch(() => {}).finally(() => this.assets.delete(key))

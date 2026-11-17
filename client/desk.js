@@ -268,6 +268,31 @@ export async function uploadFile(file) {
   return data
 }
 
+/** 把某一格成稿配图换成用户自己的图：先上传，再写进成稿并锁定，重新成稿会保留。 */
+export async function setFigure(itemId, index, file) {
+  try {
+    const { src, kind } = await uploadFile(file)
+    if (kind !== 'image') throw new Error(t('只能换成图片'))
+    await dispatchOps([{ op: 'set_figure', id: itemId, index, src }], { label: t('换成我的图') })
+    toast(t('已换成你的图，重新成稿也会保留'))
+    return true
+  } catch (err) {
+    report(err)
+    return false
+  }
+}
+
+/** 解锁某一格自己换上的图，解锁后才会被重画。 */
+export async function unlockFigure(itemId, index) {
+  try {
+    await dispatchOps([{ op: 'set_figure', id: itemId, index, src: null }], { label: t('解锁配图') })
+    return true
+  } catch (err) {
+    report(err)
+    return false
+  }
+}
+
 export async function captureFiles(files) {
   for (const file of files) {
     try {

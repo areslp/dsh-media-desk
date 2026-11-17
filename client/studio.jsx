@@ -2,7 +2,7 @@
 import React from 'react'
 import { ChatPanel } from './chat.jsx'
 import { downloadCover } from './cover.js'
-import { cancelProduce, closeItem, dispatchOps, regenAsset, revealSaved, runProduce, saveProduced, setDesk, toast, useDesk, watchProduction } from './desk.js'
+import { cancelProduce, closeItem, dispatchOps, regenAsset, revealSaved, runProduce, saveProduced, setDesk, setFigure, toast, unlockFigure, useDesk, watchProduction } from './desk.js'
 import { plural, t } from './i18n.js'
 import { Icon, IconButton } from './ui.jsx'
 import { SPRING_SNAP, SPRING_SOFT, STYLE_CATEGORIES, fmtDate, fmtWhen, reducedMotion, renderMarkdown, styleIcon, textLength, toLocalInput } from './util.js'
@@ -425,6 +425,9 @@ function Viewer({ item, target, onChange, onClose }) {
   const index = Math.max(0, list.findIndex(row => row.target === target))
   const current = list[index]
   const ref = React.useRef(null)
+  const fileRef = React.useRef(null)
+  // 只有成稿配图可以换成自己的图；封面和分镜按生图处理
+  const figureIndex = current?.target?.startsWith('image:') ? Number(current.target.slice('image:'.length)) : null
   React.useEffect(() => {
     const onKey = (event) => {
       if (event.key === 'Escape') {
@@ -454,7 +457,24 @@ function Viewer({ item, target, onChange, onClose }) {
           <IconButton icon="chevL" label={t('上一张')} disabled={!list[index - 1]} onClick={() => list[index - 1] && onChange(list[index - 1].target)} />
           <IconButton icon="chevR" label={t('下一张')} disabled={!list[index + 1]} onClick={() => list[index + 1] && onChange(list[index + 1].target)} />
           <button type="button" className="md-pill" onClick={() => { askAbout(current.label); onClose() }}><Icon name="chat" size={13} />{t('让助手改')}</button>
-          {imageReady ? <button type="button" className="md-pill" disabled={isBusy(current.asset)} onClick={() => regenAsset(item.id, current.target)}><Icon name="refresh" size={13} />{t('重画')}</button> : null}
+          {figureIndex !== null ? (
+            <>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                style={{ display: 'none' }}
+                onChange={async (event) => {
+                  const file = event.target.files?.[0]
+                  event.target.value = ''
+                  if (file) await setFigure(item.id, figureIndex, file)
+                }}
+              />
+              <button type="button" className="md-pill" onClick={() => fileRef.current?.click()}><Icon name="upload" size={13} />{t('用我的图')}</button>
+            </>
+          ) : null}
+          {current.asset.locked && figureIndex !== null ? <button type="button" className="md-pill" onClick={() => unlockFigure(item.id, figureIndex)}><Icon name="refresh" size={13} />{t('解锁重画')}</button>
+            : imageReady ? <button type="button" className="md-pill" disabled={isBusy(current.asset)} onClick={() => regenAsset(item.id, current.target)}><Icon name="refresh" size={13} />{t('重画')}</button> : null}
           {current.asset.src ? <a className="md-pill" href={current.asset.src} download><Icon name="save" size={13} />{t('下载')}</a> : null}
           <IconButton icon="close" label={t('关闭')} onClick={onClose} />
         </footer>

@@ -212,6 +212,12 @@ export const EN = {
   还没有接入生图模型: 'No image model is connected yet',
   目标无效: 'Invalid target',
   找不到这张图: 'Can\'t find this image',
+  配图序号无效: 'Invalid figure index',
+  '配图 {no} 本来就可以重画': 'image {no} is already redrawable',
+  '配图 {no} 解锁了，可以重画': 'Unlocked image {no}, it can be redrawn now',
+  图片来源无效: 'Invalid image source',
+  '配图 {no} 换成你自己的图': 'Set image {no} to your own picture',
+  这张图是你自己的先解锁再重画: 'That image is yours. Unlock it before redrawing.',
   '上次成稿被中断了，可以重新开始': 'The last draft was interrupted. You can start it again.',
 
   // 洞察与写作规则

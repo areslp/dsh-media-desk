@@ -186,6 +186,36 @@ const handlers = {
     if (typeof op.article === 'string') item.production.article = op.article.slice(0, 200000)
     return { text: tr('修改《{title}》', { title: short(item.production.title) }), target: item.id, kind: 'item' }
   },
+  /**
+   * 成稿配图换成用户自己的图：写入 src 并锁定，重新成稿时保留。
+   * src 传 null 表示解锁——解锁后这张图才会被重画。
+   */
+  set_figure(state, op) {
+    const item = findById(state.items, op.id)
+    const production = item.production
+    if (!production) throw new Error(tr('这条灵感还没有成稿'))
+    const index = Number(op.index)
+    if (!Number.isInteger(index) || index < 0 || index > 3) throw new Error(tr('配图序号无效'))
+    production.images ??= []
+    while (production.images.length <= index) production.images.push({ caption: '', anchor: '', prompt: '', status: 'idle' })
+    const figure = production.images[index]
+    if (op.src === null) {
+      if (!figure.locked) throw new Error(tr('配图 {no} 本来就可以重画', { no: index + 1 }))
+      delete figure.locked
+      delete figure.origin
+      delete figure.src
+      figure.status = 'idle'
+      return { text: tr('配图 {no} 解锁了，可以重画', { no: index + 1 }), target: item.id, kind: 'item' }
+    }
+    if (typeof op.src !== 'string' || !/^media-desk\/files\/[\w.-]+$/.test(op.src)) throw new Error(tr('图片来源无效'))
+    figure.src = op.src
+    figure.status = 'done'
+    figure.locked = true
+    figure.origin = 'upload'
+    delete figure.error
+    if (typeof op.caption === 'string' && op.caption.trim()) figure.caption = op.caption.trim().slice(0, 60)
+    return { text: tr('配图 {no} 换成你自己的图', { no: index + 1 }), target: item.id, kind: 'item' }
+  },
   add_person(state, op, now) {
     const person = { id: newId('p'), name: '', role: tr('目标读者'), note: '', traits: [], tone: Math.floor(Math.random() * 6), createdAt: now, ...pick(PERSON_FIELDS, op) }
     if (!person.name) throw new Error(tr('人物需要名字'))
