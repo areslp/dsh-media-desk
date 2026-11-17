@@ -6,10 +6,61 @@ import { newId } from './ops.js'
 
 /** 每条灵感一个 agent：itemId -> { handle, sessionId, preset } */
 const agents = new Map()
-/** 正在跑的回合：itemId -> { status, startedAt, error, tools, text } */
+/** 正在跑的回合：itemId -> { status, startedAt, error, tools, text, pending } */
 const runs = new Map()
+/** 等待用户决定的审批：requestId -> { finish, itemId } */
+const approvals = new Map()
 
 const IDLE = { status: 'idle' }
+const APPROVAL_TIMEOUT_MS = 10 * 60 * 1000
+
+/**
+ * 把这个 agent 的审批请求接到面板上：请求挂起，等用户在对话框里点允许/拒绝。
+ * @param {object} handle - agents.create 返回的 handle。
+ * @param {string} itemId - 面板上的条目 id。
+ */
+function bridgeApproval(handle, itemId) {
+  // prepend：抢在 Harness 自带的审批界面之前拿到请求，否则会被它先接管
+  handle.agent.ctx.on('approval/request', async (req, next) => {
+    // 没有界面在等（比如面板关了）就交回原链路
+    const run = runs.get(itemId)
+    if (!run) return next()
+    const id = newId('ap')
+    const decision = new Promise((resolve) => {
+      let settled = false
+      const finish = (outcome) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        approvals.delete(id)
+        resolve(outcome)
+      }
+      const timer = setTimeout(() => finish('cancelled'), APPROVAL_TIMEOUT_MS)
+      approvals.set(id, { finish, itemId })
+      req.signal?.addEventListener('abort', () => finish('cancelled'), { once: true })
+    })
+    run.pending = {
+      id,
+      toolName: req.toolName,
+      reason: req.reason ?? null,
+      displayReason: req.displayReason ?? null,
+      at: new Date().toISOString(),
+    }
+    try {
+      return await decision
+    } finally {
+      if (run.pending?.id === id) run.pending = null
+    }
+  }, { prepend: true })
+}
+
+/** 用户在面板里点了允许/拒绝。 */
+export function decideApproval(itemId, requestId, allow) {
+  const entry = approvals.get(requestId)
+  if (!entry || entry.itemId !== itemId) return false
+  entry.finish(allow ? 'allowed-once' : 'rejected')
+  return true
+}
 
 export function agentChatAvailable(ctx) {
   try {
@@ -57,9 +108,10 @@ async function openAgent(ctx, itemId, saved, { store, producer }) {
     const preset = await registry.select(handle.agent, 'standard')
     // 工作台自己的工具挂在 agent 作用域上，只有这个会话看得到
     const toolNames = registerAgentTools({ agentCtx: handle.agent.ctx, store, producer, itemId })
-    // 面板里没有审批 UI，ask 会 fail-closed；这些会话统一 never，沙箱仍是 workspace-write
+    // 审批走面板：请求挂起，用户在对话框里点允许/拒绝
+    bridgeApproval(handle, itemId)
     try {
-      ctx.get('approval')?.setPolicy(handle.agent, 'never')
+      ctx.get('approval')?.setPolicy(handle.agent, 'ask')
     } catch {
       // 审批服务不支持就按默认走
     }
@@ -92,6 +144,10 @@ function readTurn(session) {
   const reason = end?.data?.reason
   const failed = reason && reason.kind !== 'completed' ? (reason.error?.message ?? '这一轮没跑完') : null
   return { text, toolNames, failed }
+}
+
+export function agentRecordFor(itemId) {
+  return agents.get(itemId) ?? null
 }
 
 export function chatState(itemId) {

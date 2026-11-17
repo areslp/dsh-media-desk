@@ -5,7 +5,7 @@ import { stat, writeFile } from 'node:fs/promises'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assistantModelOverride, callModel, chatPrompts, defaultSelection, extractJson, modelInfo, modelStatus, setAssistantModel } from './ai.js'
-import { agentChatAvailable, chatState, startTurn } from './agent-chat.js'
+import { agentChatAvailable, chatState, decideApproval, startTurn } from './agent-chat.js'
 import { defaultExportDir, resolveExportDir, saveProduction } from './export.js'
 import { harvest, harvestText } from './harvest.js'
 import { generateImage } from './images.js'
@@ -358,6 +358,11 @@ async function route(ctx, store, desk, req, res) {
       return json(res, 200, { label, state: await store.read(), canUndo: store.undo.length > 0 })
     }
     case 'chat': return json(res, 200, await chatTurn(ctx, store, desk, body))
+    case 'agent/approve': {
+      const itemId = String(body.itemId ?? 'wall')
+      const ok = decideApproval(itemId, String(body.requestId ?? ''), Boolean(body.allow))
+      return ok ? json(res, 200, { ok: true }) : json(res, 404, { error: tr('这条审批已经结束或不存在') })
+    }
     case 'agent/turn': {
       const itemId = String(body.itemId ?? body.focusId ?? 'wall')
       const message = String(body.message ?? '').trim()

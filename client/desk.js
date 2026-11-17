@@ -228,26 +228,41 @@ export async function sendChat(text) {
   }
 }
 
-/** 轮询 agent 这一轮有没有跑完。 */
+/** 轮询 agent 这一轮有没有跑完；顺便把待审批的请求交给界面。 */
 async function waitAgent(itemId) {
   const deadline = Date.now() + 20 * 60 * 1000
-  for (;;) {
-    await new Promise(resolve => setTimeout(resolve, 1200))
-    let data = null
-    try {
-      data = await request(`agent/state?itemId=${encodeURIComponent(itemId)}`)
-    } catch {
-      return
+  try {
+    for (;;) {
+      await new Promise(resolve => setTimeout(resolve, 1200))
+      let data = null
+      try {
+        data = await request(`agent/state?itemId=${encodeURIComponent(itemId)}`)
+      } catch {
+        return
+      }
+      const run = data?.run
+      setDesk({ agentApproval: run?.pending ?? null })
+      if (run?.status !== 'running') {
+        if (run?.error) report(new Error(run.error))
+        return
+      }
+      if (Date.now() > deadline) {
+        report(new Error(t('这一轮跑得太久了，先不等了')))
+        return
+      }
     }
-    const run = data?.run
-    if (run?.status !== 'running') {
-      if (run?.error) report(new Error(run.error))
-      return
-    }
-    if (Date.now() > deadline) {
-      report(new Error(t('这一轮跑得太久了，先不等了')))
-      return
-    }
+  } finally {
+    setDesk({ agentApproval: null })
+  }
+}
+
+/** 面板里对一条审批做决定。 */
+export async function decideAgentApproval(itemId, requestId, allow) {
+  setDesk({ agentApproval: null })
+  try {
+    await request('agent/approve', { itemId, requestId, allow })
+  } catch (err) {
+    report(err)
   }
 }
 

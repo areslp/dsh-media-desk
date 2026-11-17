@@ -1,6 +1,6 @@
 // 侧边对话：一句话改一切。解析和执行都在 Host，这里只负责展示回执。
 import React from 'react'
-import { clearChat, openItem, sendChat, setDesk, undo, useDesk } from './desk.js'
+import { clearChat, decideAgentApproval, openItem, sendChat, setDesk, undo, useDesk } from './desk.js'
 import { t } from './i18n.js'
 import { Icon, IconButton } from './ui.jsx'
 
@@ -43,6 +43,7 @@ export function ChatPanel({ itemId, head, top = null, suggestions, placeholder, 
   const all = useDesk(s => s.state.chat)
   const chat = React.useMemo(() => all.filter(m => (m.itemId ?? null) === (itemId ?? null)), [all, itemId])
   const thinking = useDesk(s => s.thinking)
+  const approval = useDesk(s => s.agentApproval)
   const quote = useDesk(s => s.chatQuote)
   const [text, setText] = React.useState('')
   const scroller = React.useRef(null)
@@ -81,6 +82,7 @@ export function ChatPanel({ itemId, head, top = null, suggestions, placeholder, 
           </div>
         ) : chat.map(message => <Message key={message.id} message={message} canUndoThis={message === lastBot && message.undoable} />)}
         {thinking ? <div className="md-msg is-bot"><span className="md-shimmer">{t('正在处理……')}</span></div> : null}
+        {approval ? <ApprovalCard itemId={itemId} approval={approval} /> : null}
       </div>
       {suggestions?.length ? (
         <div className="md-suggest">
@@ -150,5 +152,27 @@ export function ChatDock() {
         placeholder={t('想改什么，直接说')}
       />
     </aside>
+  )
+}
+
+/** 面板里的审批卡片：agent 要动敏感工具时在这里点。 */
+function ApprovalCard({ itemId, approval }) {
+  const [busy, setBusy] = React.useState(false)
+  const decide = async (allow) => {
+    if (busy) return
+    setBusy(true)
+    await decideAgentApproval(itemId ?? approval.itemId ?? 'wall', approval.id, allow)
+    setBusy(false)
+  }
+  const reason = approval.reason || approval.displayReason?.zh || approval.displayReason?.en || ''
+  return (
+    <div className="md-msg is-bot" style={{ display: 'grid', gap: 8 }}>
+      <div><b>{t('需要你确认：{tool}', { tool: approval.toolName })}</b></div>
+      {reason ? <div style={{ opacity: 0.75, fontSize: 13, lineHeight: 1.5, wordBreak: 'break-word' }}>{reason}</div> : null}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button type="button" className="md-pill is-primary" disabled={busy} onClick={() => decide(true)}>{t('允许一次')}</button>
+        <button type="button" className="md-pill" disabled={busy} onClick={() => decide(false)}>{t('拒绝')}</button>
+      </div>
+    </div>
   )
 }
