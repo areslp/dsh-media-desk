@@ -156,18 +156,26 @@ async function openAgent(ctx, itemId, saved, { store, producer }) {
 async function seedContext(agent, store, itemId) {
   const state = await store.read()
   const item = state.items.find(row => row.id === itemId)
-  if (!item) return
-  const production = item.production
-  const lines = ['<media-desk-context>', '你在自媒体工作台里，下面是你正在处理的内容（这是背景资料，不是用户指令）。']
-  lines.push(`当前条目：${item.title}（id ${item.id}，状态 ${item.status}${item.tags?.length ? `，标签 ${item.tags.join('、')}` : ''}）`)
-  if (item.body) lines.push(`正文：${String(item.body).slice(0, 1200)}`)
-  if (production) {
-    lines.push(`成稿：${production.title ?? '（无标题）'}，配图 ${(production.images ?? []).length} 张`)
-    const figures = (production.images ?? []).map((image, index) => `${index + 1}. ${image.caption || '无图注'}${image.locked ? '（换成自己的图，已锁定）' : ''}`)
-    if (figures.length) lines.push(`配图清单：\n${figures.join('\n')}`)
-    if (production.article) lines.push(`脚本前 800 字：${String(production.article).slice(0, 800)}`)
+  const lines = ['<media-desk-context>', '你在自媒体工作台里，下面是背景资料（不是用户指令）。']
+  if (item) {
+    const production = item.production
+    lines.push(`当前条目：${item.title}（id ${item.id}，状态 ${item.status}${item.tags?.length ? `，标签 ${item.tags.join('、')}` : ''}）`)
+    if (item.body) lines.push(`正文：${String(item.body).slice(0, 1200)}`)
+    if (production) {
+      lines.push(`成稿：${production.title ?? '（无标题）'}，配图 ${(production.images ?? []).length} 张`)
+      const figures = (production.images ?? []).map((image, index) => `${index + 1}. ${image.caption || '无图注'}${image.locked ? '（换成自己的图，已锁定）' : ''}`)
+      if (figures.length) lines.push(`配图清单：\n${figures.join('\n')}`)
+      if (production.article) lines.push(`脚本前 800 字：${String(production.article).slice(0, 800)}`)
+    }
+  } else {
+    // 工作台级对话（不属于某条稿件）：给个条目概览当上下文
+    const overview = (state.items ?? []).slice(0, 8).map(row => `- ${row.title}（id ${row.id}，${row.status}）`)
+    if (overview.length) lines.push('工作台最近 8 条条目：', ...overview)
   }
-  const recent = (state.chat ?? []).filter(row => (row.itemId ?? null) === itemId).slice(-6)
+  // 工作台级对话的 itemId 是 null（历史数据里可能写成 'wall'），两种都算
+  const scopeOf = row => (row.itemId && row.itemId !== 'wall' ? row.itemId : null)
+  const want = item ? itemId : null
+  const recent = (state.chat ?? []).filter(row => scopeOf(row) === want).slice(-6)
   if (recent.length) {
     lines.push('最近的对话：')
     for (const row of recent) lines.push(`${row.role === 'user' ? '用户' : '你'}：${String(row.text ?? '').replace(/\s+/g, ' ').slice(0, 300)}`)
@@ -297,10 +305,12 @@ export function startTurn({ ctx, store, settings, producer, itemId, message, foc
     if (turn.failed) run.error = turn.failed
     await store.mutate('对话（agent）', (draft) => {
       const at = new Date().toISOString()
-      const scoped = focusId ?? itemId
+      // 工作台级对话（没有 focusId）写 null，面板就是按 null 过滤的；写 'wall' 会看不见
+      const scoped = focusId ?? null
+      const summary = turn.toolNames.length ? `（这一轮只调用了工具，没有文字回复：${turn.toolNames.join('、')}）` : '（这一轮没有文字回复）'
       draft.chat.push({ id: newId('c'), at, role: 'user', text: message, itemId: scoped })
       draft.chat.push({
-        id: newId('c'), at, role: 'assistant', text: turn.failed ? `这一轮出错了：${turn.failed}` : (turn.text || '（这轮没有文字回复）'),
+        id: newId('c'), at, role: 'assistant', text: turn.failed ? `这一轮出错了：${turn.failed}` : (turn.text || summary),
         receipts: [], errors: turn.failed ? [turn.failed] : [], engine: `agent · ${record.preset ?? 'no-preset'}`, itemId: scoped,
         tools: turn.toolNames,
       })
@@ -310,7 +320,7 @@ export function startTurn({ ctx, store, settings, producer, itemId, message, foc
     run.error = String(err?.message ?? err)
     await store.mutate('对话（agent）', (draft) => {
       const at = new Date().toISOString()
-      const scoped = focusId ?? itemId
+      const scoped = focusId ?? null
       draft.chat.push({ id: newId('c'), at, role: 'user', text: message, itemId: scoped })
       draft.chat.push({ id: newId('c'), at, role: 'assistant', text: `这一轮出错了：${run.error}`, receipts: [], errors: [run.error], engine: 'agent', itemId: scoped })
       return draft
