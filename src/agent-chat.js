@@ -290,6 +290,18 @@ export function startTurn({ ctx, store, settings, producer, itemId, message, foc
     const runOnce = async () => {
       // 每轮都套一次权限：改了设置不用重载插件也能生效（同预设是 no-op）
       await applyPermission(ctx, record.handle.agent, saved)
+      // 每轮也校准模型：设置里换了助手模型，已经开着的 session 也要跟着换
+      const route = routeFor(ctx, saved)
+      if (route) {
+        try {
+          const current = record.handle.agent.model.current()
+          if (!current || current.provider !== route.provider || current.model !== route.model) {
+            record.handle.agent.model.select({ provider: route.provider, model: route.model })
+          }
+        } catch {
+          // 选不了就沿用原来的
+        }
+      }
       await record.handle.agent.followup({ content: [{ type: 'text', text: message }], source: { kind: 'user' } })
       // 跑的过程中不断刷新可见状态：工具行 + 已产出的文字
       const ticker = setInterval(() => {
