@@ -100,6 +100,32 @@ export async function disposeAgents() {
   for (const itemId of [...agents.keys()]) await dropAgent(itemId)
 }
 
+/**
+ * 按工作台设置给这个 agent 套权限。
+ * ask = 沙箱 workspace-write + 敏感操作弹面板卡片；full = full access + 不再询问。
+ * @param {object} ctx - 插件上下文。
+ * @param {object} agent - agent 句柄。
+ * @param {object} saved - 工作台设置。
+ */
+async function applyPermission(ctx, agent, saved) {
+  const full = saved?.agentPermission === 'full'
+  const presets = ctx.get('permissionPresets')
+  const approval = ctx.get('approval')
+  if (presets) {
+    try {
+      await presets.apply(agent.session, full ? 'danger-full-access' : 'workspace-write', policy => approval?.setPolicy(agent, policy))
+      return
+    } catch {
+      // 预设切不了就只改审批策略
+    }
+  }
+  try {
+    approval?.setPolicy(agent, full ? 'never' : 'ask')
+  } catch {
+    // 审批服务不支持就按默认走
+  }
+}
+
 async function openAgent(ctx, itemId, saved, { store, producer }) {
   const existing = agents.get(itemId)
   if (existing) return existing
@@ -128,11 +154,7 @@ async function openAgent(ctx, itemId, saved, { store, producer }) {
     const toolNames = registerAgentTools({ agentCtx: handle.agent.ctx, store, producer, itemId })
     // 审批走面板：请求挂起，用户在对话框里点允许/拒绝
     bridgeApproval(handle, itemId)
-    try {
-      ctx.get('approval')?.setPolicy(handle.agent, 'ask')
-    } catch {
-      // 审批服务不支持就按默认走
-    }
+    await applyPermission(ctx, handle.agent, saved)
     // 新 session 不继承上一次的记忆：把这条稿子的现状和最近几轮对话重新喂给它
     await seedContext(handle.agent, store, itemId).catch(() => {})
     const record = { handle, sessionId: handle.agent.id, preset, toolNames }
@@ -266,6 +288,8 @@ export function startTurn({ ctx, store, settings, producer, itemId, message, foc
 
     // 跑一轮；如果撞上「session 不在 SessionStore 里」这类残留状态，扔掉重开一次
     const runOnce = async () => {
+      // 每轮都套一次权限：改了设置不用重载插件也能生效（同预设是 no-op）
+      await applyPermission(ctx, record.handle.agent, saved)
       await record.handle.agent.followup({ content: [{ type: 'text', text: message }], source: { kind: 'user' } })
       // 跑的过程中不断刷新可见状态：工具行 + 已产出的文字
       const ticker = setInterval(() => {

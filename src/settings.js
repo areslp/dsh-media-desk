@@ -13,6 +13,8 @@ const DEFAULTS = {
   imageCount: 2,
   shotCount: 6,
   language: 'auto',
+  // 工作台助手的权限：ask = 敏感操作弹卡片问；full = 完全放行（沙箱 full access + 不再询问）
+  agentPermission: 'ask',
 }
 
 function clamp(value, min, max, fallback) {
@@ -103,6 +105,7 @@ export class Settings {
     if (typeof patch.generateImages === 'boolean') next.generateImages = patch.generateImages
     if (patch.imageCount !== undefined) next.imageCount = clamp(patch.imageCount, 0, 4, current.imageCount)
     if (['auto', 'zh', 'en'].includes(patch.language)) next.language = patch.language
+    if (patch.agentPermission !== undefined) next.agentPermission = patch.agentPermission === 'full' ? 'full' : 'ask'
     if (patch.shotCount !== undefined) next.shotCount = clamp(patch.shotCount, 0, 12, current.shotCount)
     const tmp = `${this.file}.${process.pid}.tmp`
     await writeFile(tmp, JSON.stringify(next, null, 2), { mode: 0o600 })

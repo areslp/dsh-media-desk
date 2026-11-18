@@ -37,7 +37,7 @@ export function SettingsDialog() {
   React.useEffect(() => {
     if (!open || !settings) return
     const { image } = settings
-    setForm({ source: image.source ?? 'http', protocol: image.protocol ?? 'openai', language: settings.language ?? 'auto', baseUrl: image.baseUrl, model: image.model, apiKey: '', size: image.size, quality: image.quality, toolSize: image.toolSize ?? '1536x1024', toolQuality: image.toolQuality ?? '', extra: image.extra, exportDir: settings.exportDir ?? '', generateImages: settings.generateImages !== false, imageCount: settings.imageCount, shotCount: settings.shotCount })
+    setForm({ source: image.source ?? 'http', protocol: image.protocol ?? 'openai', language: settings.language ?? 'auto', baseUrl: image.baseUrl, model: image.model, apiKey: '', size: image.size, quality: image.quality, toolSize: image.toolSize ?? '1536x1024', toolQuality: image.toolQuality ?? '', extra: image.extra, exportDir: settings.exportDir ?? '', generateImages: settings.generateImages !== false, imageCount: settings.imageCount, shotCount: settings.shotCount, agentPermission: settings.agentPermission === 'full' ? 'full' : 'ask' })
     setSample(null)
   }, [open, settings])
   if (!open || !form) return null
@@ -47,6 +47,7 @@ export function SettingsDialog() {
     language: form.language,
     image: { source: form.source, protocol: form.protocol, baseUrl: form.baseUrl, model: form.model, apiKey: form.apiKey, size: form.size, quality: form.quality, toolSize: form.toolSize, toolQuality: form.toolQuality, extra: form.extra },
     exportDir: form.exportDir, generateImages: form.generateImages, imageCount: Number(form.imageCount), shotCount: Number(form.shotCount),
+    agentPermission: form.agentPermission === 'full' ? 'full' : 'ask',
   })
   const activePreset = PRESETS.find(p => p.baseUrl && p.baseUrl === form.baseUrl && (p.protocol ?? 'openai') === form.protocol)?.id ?? (form.baseUrl ? 'custom' : null)
   return (
@@ -117,6 +118,14 @@ export function SettingsDialog() {
           <label className="md-field"><span>{t('配图数量')}</span><input type="number" min="0" max="4" value={form.imageCount} onChange={e => set('imageCount', e.target.value)} /></label>
           <label className="md-field"><span>{t('分镜格数')}</span><input type="number" min="0" max="12" value={form.shotCount} onChange={e => set('shotCount', e.target.value)} /></label>
         </div>
+        <label className="md-field">
+          <span>{t('助手权限')}</span>
+          <select value={form.agentPermission} onChange={e => set('agentPermission', e.target.value)}>
+            <option value="ask">{t('敏感操作先问我')}</option>
+            <option value="full">{t('完全放行，不再询问')}</option>
+          </select>
+          <small>{t('只影响工作台里的助手会话；放行后它能直接读写工作台以外的文件。')}</small>
+        </label>
         <button type="button" className="md-advanced" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}><Icon name={advanced ? 'chevD' : 'chevR'} size={12} />{t('高级')}</button>
         {advanced ? (
           <>
