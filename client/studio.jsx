@@ -24,6 +24,35 @@ async function imageDataUrl(src) {
   })
 }
 
+const stripTags = html => String(html ?? '').replace(/<[^>]+>/g, '').trim()
+
+/**
+ * 公众号移动端渲染不了多列表格（检测器会报「居中布局不一致/宽度差异或溢出」），
+ * 这里把表格拆成「术语 + 说明」的卡片式段落：第一列加粗当标题，其余列按表头拼成说明。
+ */
+function tablesToCards(html) {
+  return String(html).replace(/<table>([\s\S]*?)<\/table>/g, (_whole, inner) => {
+    const heads = [...inner.matchAll(/<th>([\s\S]*?)<\/th>/g)].map(match => stripTags(match[1]))
+    const rows = [...inner.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map(match => match[1]).filter(row => row.includes('<td>'))
+    if (!rows.length) return ''
+    const cards = rows.map((row) => {
+      const cells = [...row.matchAll(/<td>([\s\S]*?)<\/td>/g)].map(match => match[1])
+      const [first, ...rest] = cells
+      const details = rest
+        .map((cell, index) => {
+          const text = stripTags(cell)
+          if (!text) return ''
+          const name = heads[index + 1]
+          return name ? `${name}：${text}` : text
+        })
+        .filter(Boolean)
+        .join('；')
+      return `<p style="margin:18px 0 4px"><b style="font-weight:700">${stripTags(first)}</b></p>${details ? `<p style="margin:0 0 14px;font-size:13px;line-height:1.7;color:#666">${details}</p>` : ''}`
+    })
+    return cards.join('')
+  })
+}
+
 /**
  * 公众号那一侧不认 <figure>/<figcaption>，也常常把 <strong>/<h2> 的默认样式洗掉，
  * 所以这里统一换成带内联样式的 <p>/<span>，只留编辑器普遍接受的标签。
@@ -63,7 +92,7 @@ async function richScriptHtml(production) {
     const target = at >= 0 ? at : Math.max(0, sections.length - 1)
     figureHtml.set(target, [...(figureHtml.get(target) ?? []), html])
   }
-  const body = sections.map((section, index) => `${wechatize(renderMarkdown(section.text))}${(figureHtml.get(index) ?? []).join('')}`).join('')
+  const body = sections.map((section, index) => `${wechatize(tablesToCards(renderMarkdown(section.text)))}${(figureHtml.get(index) ?? []).join('')}`).join('')
   return `<section style="font-size:16px;line-height:1.75;color:#333">${body}</section>`
 }
 
