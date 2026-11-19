@@ -359,8 +359,8 @@ async function route(ctx, store, desk, req, res) {
     }
     case 'chat': return json(res, 200, await chatTurn(ctx, store, desk, body))
     case 'agent/reset': {
-      await resetAgent(String(body.itemId ?? 'wall'))
-      return json(res, 200, { ok: true })
+      await resetAgent(String(body.itemId ?? 'wall'), store)
+      return json(res, 200, { ok: true, state: await store.read() })
     }
     case 'agent/approve': {
       const itemId = String(body.itemId ?? 'wall')

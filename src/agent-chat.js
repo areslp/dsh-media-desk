@@ -103,12 +103,23 @@ export async function disposeAgents() {
 /** 这些 scope 下次开 session 时不要再灌历史对话（用户点了「新会话」）。 */
 const freshScopes = new Set()
 
-/** 新开一个会话：丢掉当前 agent，下一句话从干净上下文开始。 */
-export async function resetAgent(itemId) {
+/** 新开一个会话：丢掉当前 agent 和这条对话的记录，下一句话从干净上下文开始。 */
+export async function resetAgent(itemId, store) {
   if (runs.get(itemId)?.status === 'running') throw Object.assign(new Error('这条还在跑，等它说完再开新会话'), { status: 429 })
   freshScopes.add(itemId)
   await dropAgent(itemId)
   runs.delete(itemId)
+  if (store) {
+    // 对话记录也一起清掉：新会话就该是空的聊天框
+    const scope = itemId === 'wall' ? null : itemId
+    await store.mutate('新会话', (draft) => {
+      draft.chat = (draft.chat ?? []).filter(row => {
+        const rowScope = row.itemId && row.itemId !== 'wall' ? row.itemId : null
+        return rowScope !== scope
+      })
+      return draft
+    })
+  }
 }
 
 /**

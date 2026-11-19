@@ -199,6 +199,8 @@ export const STUDIO = {
   '允许一次': 'Allow once',
   '拒绝': 'Reject',
   'agent 模式 · 会调用工具': 'Agent mode · can use tools',
+  '新会话': 'New session',
+  '新会话已开': 'Started a new session',
   '这条对话跑在真正的 agent 上，会调用工具，敏感操作需要你确认': 'This chat runs on a real agent: it can call tools, and sensitive actions ask you first.',
   '下载': 'Download',
   '返回灵感': 'Back to ideas',

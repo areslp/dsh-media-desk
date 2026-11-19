@@ -266,11 +266,12 @@ export async function decideAgentApproval(itemId, requestId, allow) {
   }
 }
 
-/** 扔掉当前的 agent session，下一句话从干净上下文开始。 */
+/** 扔掉当前的 agent session 和这条对话的记录，下一句话从干净上下文开始。 */
 export async function newAgentSession(itemId) {
   try {
-    await request('agent/reset', { itemId })
-    toast(t('已开新会话，之前的上下文不再带进来'))
+    const data = await request('agent/reset', { itemId })
+    setDesk({ agentApproval: null, agentLive: null, ...(data.state ? { state: data.state } : {}) })
+    toast(t('新会话已开'))
   } catch (err) {
     report(err)
   }
