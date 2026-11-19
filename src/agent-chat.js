@@ -100,6 +100,17 @@ export async function disposeAgents() {
   for (const itemId of [...agents.keys()]) await dropAgent(itemId)
 }
 
+/** 这些 scope 下次开 session 时不要再灌历史对话（用户点了「新会话」）。 */
+const freshScopes = new Set()
+
+/** 新开一个会话：丢掉当前 agent，下一句话从干净上下文开始。 */
+export async function resetAgent(itemId) {
+  if (runs.get(itemId)?.status === 'running') throw Object.assign(new Error('这条还在跑，等它说完再开新会话'), { status: 429 })
+  freshScopes.add(itemId)
+  await dropAgent(itemId)
+  runs.delete(itemId)
+}
+
 /**
  * 按工作台设置给这个 agent 套权限。
  * ask = 沙箱 workspace-write + 敏感操作弹面板卡片；full = full access + 不再询问。
@@ -156,7 +167,8 @@ async function openAgent(ctx, itemId, saved, { store, producer }) {
     bridgeApproval(handle, itemId)
     await applyPermission(ctx, handle.agent, saved)
     // 新 session 不继承上一次的记忆：把这条稿子的现状和最近几轮对话重新喂给它
-    await seedContext(handle.agent, store, itemId).catch(() => {})
+    await seedContext(handle.agent, store, itemId, { withHistory: !freshScopes.has(itemId) }).catch(() => {})
+    freshScopes.delete(itemId)
     const record = { handle, sessionId: handle.agent.id, preset, toolNames }
     agents.set(itemId, record)
     return record
@@ -175,7 +187,7 @@ async function openAgent(ctx, itemId, saved, { store, producer }) {
  * @param {object} store - 工作台状态。
  * @param {string} itemId - 条目 id。
  */
-async function seedContext(agent, store, itemId) {
+async function seedContext(agent, store, itemId, { withHistory = true } = {}) {
   const state = await store.read()
   const item = state.items.find(row => row.id === itemId)
   const lines = ['<media-desk-context>', '你在自媒体工作台里，下面是背景资料（不是用户指令）。']
@@ -197,7 +209,7 @@ async function seedContext(agent, store, itemId) {
   // 工作台级对话的 itemId 是 null（历史数据里可能写成 'wall'），两种都算
   const scopeOf = row => (row.itemId && row.itemId !== 'wall' ? row.itemId : null)
   const want = item ? itemId : null
-  const recent = (state.chat ?? []).filter(row => scopeOf(row) === want).slice(-6)
+  const recent = withHistory ? (state.chat ?? []).filter(row => scopeOf(row) === want).slice(-6) : []
   if (recent.length) {
     lines.push('最近的对话：')
     for (const row of recent) lines.push(`${row.role === 'user' ? '用户' : '你'}：${String(row.text ?? '').replace(/\s+/g, ' ').slice(0, 300)}`)

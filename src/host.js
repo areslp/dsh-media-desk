@@ -5,7 +5,7 @@ import { stat, writeFile } from 'node:fs/promises'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assistantModelOverride, callModel, chatPrompts, defaultSelection, extractJson, modelInfo, modelStatus, setAssistantModel } from './ai.js'
-import { agentChatAvailable, chatState, decideApproval, disposeAgents, startTurn } from './agent-chat.js'
+import { agentChatAvailable, chatState, decideApproval, disposeAgents, resetAgent, startTurn } from './agent-chat.js'
 import { defaultExportDir, resolveExportDir, saveProduction } from './export.js'
 import { harvest, harvestText } from './harvest.js'
 import { generateImage } from './images.js'
@@ -358,6 +358,10 @@ async function route(ctx, store, desk, req, res) {
       return json(res, 200, { label, state: await store.read(), canUndo: store.undo.length > 0 })
     }
     case 'chat': return json(res, 200, await chatTurn(ctx, store, desk, body))
+    case 'agent/reset': {
+      await resetAgent(String(body.itemId ?? 'wall'))
+      return json(res, 200, { ok: true })
+    }
     case 'agent/approve': {
       const itemId = String(body.itemId ?? 'wall')
       const ok = decideApproval(itemId, String(body.requestId ?? ''), Boolean(body.allow))

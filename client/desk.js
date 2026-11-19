@@ -266,6 +266,16 @@ export async function decideAgentApproval(itemId, requestId, allow) {
   }
 }
 
+/** 扔掉当前的 agent session，下一句话从干净上下文开始。 */
+export async function newAgentSession(itemId) {
+  try {
+    await request('agent/reset', { itemId })
+    toast(t('已开新会话，之前的上下文不再带进来'))
+  } catch (err) {
+    report(err)
+  }
+}
+
 export async function saveProduced(id) {
   try {
     const production = snapshot.state.items.find(row => row.id === id)?.production

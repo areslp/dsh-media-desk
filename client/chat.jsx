@@ -1,6 +1,6 @@
 // 侧边对话：一句话改一切。解析和执行都在 Host，这里只负责展示回执。
 import React from 'react'
-import { clearChat, decideAgentApproval, openItem, sendChat, setDesk, undo, useDesk } from './desk.js'
+import { clearChat, decideAgentApproval, newAgentSession, openItem, sendChat, setDesk, undo, useDesk } from './desk.js'
 import { t } from './i18n.js'
 import { Icon, IconButton } from './ui.jsx'
 
@@ -96,6 +96,14 @@ export function ChatPanel({ itemId, head, top = null, suggestions, placeholder, 
         <div style={{ padding: '0 20px 4px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, opacity: 0.65 }} title={t('这条对话跑在真正的 agent 上，会调用工具，敏感操作需要你确认')}>
           <span style={{ width: 6, height: 6, borderRadius: 99, background: 'currentColor' }} />
           {t('agent 模式 · 会调用工具')}
+          <span style={{ flex: 1 }} />
+          <button
+            type="button"
+            className="md-pill"
+            style={{ fontSize: 11, padding: '1px 8px', opacity: 1 }}
+            disabled={thinking}
+            onClick={() => newAgentSession(itemId ?? 'wall')}
+          >{t('新会话')}</button>
         </div>
       ) : null}
       <form className="md-composer" onSubmit={(event) => { event.preventDefault(); send() }}>
