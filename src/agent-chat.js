@@ -203,7 +203,7 @@ async function seedContext(agent, store, itemId) {
     for (const row of recent) lines.push(`${row.role === 'user' ? '用户' : '你'}：${String(row.text ?? '').replace(/\s+/g, ' ').slice(0, 300)}`)
   }
   lines.push('</media-desk-context>')
-  await agent.inject({ id: newId('msg'), content: [{ type: 'text', text: lines.join('\n') }], source: { kind: 'user' } })
+  await agent.inject({ id: newId('msg'), role: 'user', content: [{ type: 'text', text: lines.join('\n') }], source: { kind: 'user' } })
 }
 
 /** 把一轮的事件折成给面板看的结果（结束时用）。 */
@@ -302,7 +302,7 @@ export function startTurn({ ctx, store, settings, producer, itemId, message, foc
           // 选不了就沿用原来的
         }
       }
-      await record.handle.agent.followup({ content: [{ type: 'text', text: message }], source: { kind: 'user' } })
+      await record.handle.agent.followup({ id: newId('msg'), role: 'user', content: [{ type: 'text', text: message }], source: { kind: 'user' } })
       // 跑的过程中不断刷新可见状态：工具行 + 已产出的文字
       const ticker = setInterval(() => {
         try {
@@ -327,7 +327,8 @@ export function startTurn({ ctx, store, settings, producer, itemId, message, foc
       await runOnce()
     } catch (err) {
       const message = String(err?.message ?? err)
-      if (!/SessionStore|outside a Session/i.test(message)) throw err
+      // 旧 session 里可能存着格式坏掉的消息（比如缺 role），这类残留一律重开一条再试
+      if (!/SessionStore|outside a Session|missing field/i.test(message)) throw err
       // 旧的 session 已经不在 store 里：收掉它，换一条新的再试一次
       await dropAgent(itemId)
       record = await openAgent(ctx, itemId, saved, { store, producer })
