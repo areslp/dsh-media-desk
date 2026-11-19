@@ -387,7 +387,7 @@ button.md-stamp:not(:disabled):hover { transform: scale(1.08) rotate(-2deg); }
 .md-plate::after { content: ''; position: absolute; inset: 0; pointer-events: none; }
 .md-plate[data-status="running"]::after, .md-plate[data-status="pending"]::after { background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--ink) 8%, transparent) 50%, transparent 70%); background-size: 220% 100%; animation: md-shimmer-bg 1.6s linear infinite; }
 @keyframes md-shimmer-bg { to { background-position: -220% 0; } }
-.md-plate img { display: block; width: 100%; height: 100%; object-fit: cover; animation: md-develop .9s var(--ease) both; }
+.md-plate img { display: block; width: 100%; height: 100%; object-fit: contain; animation: md-develop .9s var(--ease) both; }
 @keyframes md-develop { from { opacity: 0; filter: blur(10px); transform: scale(1.03); } }
 .md-plate.is-paper { border-radius: var(--r-sm); background: #fff; box-shadow: 0 0 0 .5px #17171a40; }
 .md-plate.is-paper img { object-fit: cover; }
@@ -407,7 +407,9 @@ button.md-stamp:not(:disabled):hover { transform: scale(1.08) rotate(-2deg); }
 .md-root .md-tile-article.is-open .md-prose h2 { font-size: 19px; line-height: 30px; margin: 26px 0 8px; }
 .md-root .md-tile-article.is-open .md-prose p { margin-bottom: 14px; }
 .md-article-figure { margin: 10px 0 24px; }
-.md-article-figure .md-plate { aspect-ratio: 3 / 2; height: auto; border-radius: var(--r-lg); }
+/* 正文里的配图按原比例整张显示，不裁切（用户自己的技术图常有边缘文字） */
+.md-article-figure .md-plate { aspect-ratio: auto; height: auto; border-radius: var(--r-lg); }
+.md-article-figure .md-plate img { width: 100%; height: auto; max-height: 72vh; object-fit: contain; }
 .md-article-figure figcaption { margin-top: 8px; text-align: center; color: var(--ink3); font-size: 12.5px; line-height: 18px; }
 .md-root .md-article-edit { flex: 1; display: block; width: 100%; min-height: 0; padding: 0 20px 22px 18px; border: 0; background: none; outline: 0; resize: none; font-size: 14px; line-height: 25px; }
 .md-root .md-tile-article.is-open .md-article-edit { width: min(740px, 100%); margin: 0 auto; font-size: 16px; line-height: 30px; }
