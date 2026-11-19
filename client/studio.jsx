@@ -56,14 +56,15 @@ async function richScriptHtml(production) {
       continue
     }
     const caption = escapeHtml(image.caption ?? '')
-    // 图放在 <p> 里、图注也是 <p>：公众号的一键排版只保留这类结构
-    const html = `<p style="margin:18px 0 4px;text-align:center"><img src="${data}" alt="${caption}" style="max-width:100%;height:auto"/></p>${caption ? `<p style="margin:0 0 18px;text-align:center;font-size:13px;line-height:1.6;color:#888">${caption}</p>` : ''}`
+    // 图用 display:block + width:100%，不要靠父级 text-align:center 居中：
+    // 公众号结构检测会把「居中 + 内联图片」标成「居中布局不一致/宽度差异」
+    const html = `<p style="margin:18px 0 4px"><img src="${data}" alt="${caption}" style="display:block;width:100%;height:auto;margin:0 auto"/></p>${caption ? `<p style="margin:0 0 18px;text-align:center;font-size:13px;line-height:1.6;color:#888">${caption}</p>` : ''}`
     const at = sections.findIndex(section => image.anchor && section.heading === image.anchor)
     const target = at >= 0 ? at : Math.max(0, sections.length - 1)
     figureHtml.set(target, [...(figureHtml.get(target) ?? []), html])
   }
   const body = sections.map((section, index) => `${wechatize(renderMarkdown(section.text))}${(figureHtml.get(index) ?? []).join('')}`).join('')
-  return `<div style="font-size:16px;line-height:1.75;color:#333">${body}</div>`
+  return `<section style="font-size:16px;line-height:1.75;color:#333">${body}</section>`
 }
 
 /** 复制脚本：优先 HTML（图片内嵌），浏览器不支持或失败时退回纯文本。 */
